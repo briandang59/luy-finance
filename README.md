@@ -17,11 +17,18 @@ Chế độ chưa có cấu hình dùng dữ liệu mẫu, lưu trong trình duy
 ## Các màn hình
 
 - **Tổng quan:** tổng tiền hiện có, phần tiết kiệm, tiền sinh hoạt; thu/chi, phần dư, tỷ lệ dư theo tháng; biểu đồ 6 tháng; danh mục chi và mục tiêu.
-- **Sổ thu chi:** thêm/sửa/xóa, ghi chú, danh mục có sẵn, tìm kiếm, lọc theo tháng/loại/danh mục; khoản chưa rõ Thu/Chi có hàng chờ xác nhận.
+- **Sổ thu chi:** thêm/sửa/xóa, ghi chú, danh mục có sẵn, tìm kiếm, lọc theo tháng/năm/khoảng tháng/mọi thời gian, loại và danh mục; khoản chưa rõ Thu/Chi có hàng chờ xác nhận. Tổng thu/chi tính cho toàn bộ kỳ đã chọn.
+- **Thống kê:** tổng thu, tổng chi, dư thu chi và tỷ lệ dư; bảng gộp từng tháng hoặc từng năm, có nút mở các khoản trong kỳ. Bao gồm dữ liệu lịch sử đã nhập và các khoản mới; xem được lịch sử trước khi thiết lập mốc số dư.
 - **Tiết kiệm:** để dành, rút, phân bổ mục tiêu, trả về quỹ chung và lịch sử chuyển quỹ.
 - **Mục tiêu:** số tiền cần đạt, thời hạn theo tháng, màu/biểu tượng, ghi chú, tiến độ và số tiền cần dành mỗi tháng.
 - **Nhập dữ liệu:** CSV có màn hình ghép cột, xem trước, báo lỗi, chống nhập lại file và cảnh báo khoản có nội dung giống nhau. Khôi phục JSON cần xác nhận thay toàn bộ sổ.
 - **Cài đặt:** sao lưu JSON, đối chiếu số dư, chốt tháng, tải lại dữ liệu và cập nhật bảng tổng hợp.
+
+### Xem lại thu chi cũ
+
+Mở **Thống kê → Xem theo**, chọn **Tháng**, **Năm**, **Khoảng tháng** hoặc **Mọi thời gian**. Ví dụ chọn **Khoảng tháng**, từ **12/2024** đến **02/2025** để xem tổng cả ba tháng, bao gồm tháng đầu và tháng cuối. Chọn **Gộp theo → Từng tháng / Từng năm** để đổi cách trình bày; chọn **Xem khoản** ở từng dòng để mở đúng các khoản trong Sổ thu chi.
+
+Năm hiện tại tính từ tháng 1 đến tháng hiện tại. Tháng chưa có ghi chép hiện **Chưa có dữ liệu**; khoản **Cần xác nhận** được đếm riêng và chưa cộng vào Thu/Chi. Tỷ lệ dư của cả kỳ tính bằng tổng dư chia tổng thu, không lấy trung bình các tỷ lệ tháng. Nếu dữ liệu cũ chưa nằm trong ứng dụng, mở **Nhập dữ liệu** để nhập CSV hoặc bản sao lưu JSON trước.
 
 ## Số liệu được tính thế nào?
 

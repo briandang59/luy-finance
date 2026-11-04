@@ -118,6 +118,29 @@ export function monthStats(state,period) {
   const saving = sum(state.moves.filter(m => monthKey(m.at) === period).map(m => m.kind === 'deposit' ? m.amount : m.kind === 'withdraw' ? -m.amount : 0));
   return {income,expense,net:income - expense,saving,pending:entries.filter(e => e.type === 'unknown').length,unclassified:entries.filter(e => e.category === 'unclassified').length,count:entries.length,rate:income > 0 ? (income - expense) / income * 100 : null};
 }
+export function rangeStats(state,from,to,{groupBy = 'month'} = {}) {
+  check(validPeriod(from) && validPeriod(to) && from <= to,'Tháng bắt đầu phải trước hoặc bằng tháng kết thúc.');
+  check(['month','year'].includes(groupBy),'Chọn thống kê theo tháng hoặc năm.');
+  const blank = () => ({income:0,expense:0,pending:0,unclassified:0,count:0});
+  const totals = blank(), groups = new Map();
+  for (let period = from; period <= to; period = shiftMonth(period,1)) {
+    const key = groupBy === 'year' ? period.slice(0,4) : period;
+    if (!groups.has(key)) groups.set(key,{period:key,from:period,to:period,...blank()});
+    else groups.get(key).to = period;
+  }
+  for (const entry of state.entries) {
+    if (entry.period < from || entry.period > to) continue;
+    const row = groups.get(groupBy === 'year' ? entry.period.slice(0,4) : entry.period);
+    for (const target of [totals,row]) {
+      target.count++;
+      if (entry.type === 'unknown') target.pending++;
+      else target[entry.type] = sum([target[entry.type],entry.amount]);
+      if (entry.category === 'unclassified') target.unclassified++;
+    }
+  }
+  const finish = row => ({...row,net:sum([row.income,-row.expense]),rate:row.income > 0 ? (row.income - row.expense) / row.income * 100 : null});
+  return {...finish(totals),from,to,rows:[...groups.values()].map(finish)};
+}
 export function goalProgress(state,goal,period = monthKey()) {
   const amount = balances(state).funds.get(goal.id) || 0, remaining = Math.max(0,goal.target - amount);
   const months = goal.deadline ? (Number(goal.deadline.slice(0,4)) - Number(period.slice(0,4))) * 12 + Number(goal.deadline.slice(5)) - Number(period.slice(5)) + 1 : null;

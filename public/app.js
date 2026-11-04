@@ -1,4 +1,4 @@
-import {CATEGORIES,categoryInfo,emptyState,balances,monthStats,goalProgress,categoryTotals,applyOperation,validateBackup,parseMoney,dayKey,monthKey,shiftMonth,periodLabel} from './shared/model.js';
+import {CATEGORIES,categoryInfo,emptyState,balances,monthStats,rangeStats,goalProgress,categoryTotals,applyOperation,validateBackup,parseMoney,dayKey,monthKey,shiftMonth,periodLabel,validPeriod} from './shared/model.js';
 import {seedState} from './shared/seed.js';
 import {parseCSV,detectMapping,importPreview,fold} from './shared/import.js';
 
@@ -13,8 +13,8 @@ const key = 'luy-finance-data-v1', prefKey = 'luy-finance-prefs-v1';
 let prefs = {theme:'light',hidden:false};
 try {prefs = {...prefs,...JSON.parse(localStorage.getItem(prefKey) || '{}')};} catch {}
 document.documentElement.dataset.theme = prefs.theme === 'dark' ? 'dark' : 'light';
-const ui = {data:emptyState(),session:null,tab:'overview',period:monthKey(),query:'',filter:'all',category:'all',allTime:false,modal:null,loading:false,error:'',localError:false};
-const tabs = {overview:['Tổng quan','grid'],ledger:['Sổ thu chi','book'],savings:['Tiết kiệm','wallet'],goals:['Mục tiêu','target'],import:['Nhập dữ liệu','upload'],settings:['Cài đặt','settings']};
+const ui = {data:emptyState(),session:null,tab:'overview',period:monthKey(),reportMode:'month',reportYear:monthKey().slice(0,4),reportFrom:`${monthKey().slice(0,4)}-01`,reportTo:monthKey(),reportGroup:'month',query:'',filter:'all',category:'all',modal:null,loading:false,error:'',localError:false};
+const tabs = {overview:['Tổng quan','grid'],ledger:['Sổ thu chi','book'],reports:['Thống kê','chart'],savings:['Tiết kiệm','wallet'],goals:['Mục tiêu','target'],import:['Nhập dữ liệu','upload'],settings:['Cài đặt','settings']};
 const types = {income:'Thu nhập',expense:'Chi tiêu',unknown:'Cần xác nhận'};
 const moveNames = {deposit:'Để dành',withdraw:'Rút tiết kiệm',allocate:'Phân bổ mục tiêu',release:'Trả về quỹ chung'};
 const num = value => new Intl.NumberFormat('vi-VN').format(value);
@@ -75,17 +75,18 @@ function intro(title,subtitle,actions = '',withPeriod = true) {
 function pageContent() {
   if (ui.tab === 'settings') return settingsPage();
   if (ui.tab === 'import') return importPage();
+  if (ui.tab === 'reports') return reportsPage();
+  if (ui.tab === 'ledger') return ledgerPage();
   if (!ui.data.settings) return `${intro('Bắt đầu từ hôm nay.','Bạn không cần một lịch sử hoàn hảo để bắt đầu dành dụm.','',false)}${empty('Bạn đang có bao nhiêu?','Nhập tổng tiền thực tế và phần đã dành làm tiết kiệm. Lịch sử cũ sẽ được lưu riêng, không cộng lại vào số dư này.','setup','Thiết lập số dư','wallet')}`;
   return {overview:overviewPage,ledger:ledgerPage,savings:savingsPage,goals:goalsPage}[ui.tab]();
 }
 function stat(label,amount,ico,note,cls = '') {return `<article class="stat"><div class="stat-top">${label}${icon(ico)}</div><div class="stat-amount ${cls}">${amount}</div><small>${note}</small></article>`;}
-function statsBlock() {
-  const s = monthStats(ui.data,ui.period);
-  return `<div class="stats">${stat('Thu nhập tháng này',money(s.income),'arrowDown','Các khoản đã xác nhận là Thu','income')}${stat('Chi tiêu tháng này',money(s.expense),'arrowUp','Không bao gồm chuyển vào tiết kiệm','expense')}${stat('Dư từ thu chi',money(s.net),'chart','Thu nhập − chi tiêu',s.net < 0 ? 'negative' : '')}${stat('Tỷ lệ dư',s.rate === null ? '—' : `${num(Math.round(s.rate))}%`,'percent',s.rate === null ? 'Chưa có thu nhập để tính tỷ lệ' : 'Dư từ thu chi / thu nhập')}</div>`;
+function statsBlock(s = monthStats(ui.data,ui.period),label = `Tháng ${periodLabel(ui.period)}`) {
+  return `<div class="stats">${stat('Tổng thu',money(s.income),'arrowDown',label,'income')}${stat('Tổng chi',money(s.expense),'arrowUp',label,'expense')}${stat('Dư từ thu chi',money(s.net),'chart','Thu nhập − chi tiêu',s.net < 0 ? 'negative' : '')}${stat('Tỷ lệ dư',s.rate === null ? '—' : `${num(Math.round(s.rate))}%`,'percent',s.rate === null ? 'Chưa có thu nhập để tính tỷ lệ' : 'Dư từ thu chi / thu nhập')}</div>`;
 }
-function balanceWarnings() {
-  const b = balances(ui.data), p = monthStats(ui.data,ui.period);
-  return `${b.shortfall ? notice(`Số dư thực tế đang thiếu ${money(b.shortfall)} so với phần đã dành tiết kiệm. Kiểm tra thu chi hoặc rút bớt tiết kiệm để đối chiếu.`) : ''}${p.pending ? notice(`Có ${p.pending} khoản chưa xác nhận Thu/Chi trong tháng này, chưa được tính vào tổng. <button data-action="pending">Xem và xác nhận</button>`) : ''}`;
+function balanceWarnings(p = monthStats(ui.data,ui.period)) {
+  const b = balances(ui.data);
+  return `${b.shortfall ? notice(`Số dư thực tế đang thiếu ${money(b.shortfall)} so với phần đã dành tiết kiệm. Kiểm tra thu chi hoặc rút bớt tiết kiệm để đối chiếu.`) : ''}${p.pending ? notice(`Có ${p.pending} khoản chưa xác nhận Thu/Chi trong kỳ đang xem, chưa được tính vào tổng. <button data-action="pending">Xem và xác nhận</button>`) : ''}`;
 }
 function overviewPage() {
   const b = balances(ui.data), s = monthStats(ui.data,ui.period), name = esc(ui.data.settings.name), time = Number(new Intl.DateTimeFormat('en-US',{hour:'numeric',hour12:false,timeZone:'Asia/Ho_Chi_Minh'}).format(new Date()));
@@ -112,12 +113,32 @@ function entryTable(rows) {
   if (!rows.length) return empty('Trang sổ còn trống.','Thêm một khoản thu chi, hoặc nhập dữ liệu cũ để bắt đầu.','entry','Ghi khoản đầu tiên','book');
   return `<div class="table-wrap"><table><thead><tr><th>NỘI DUNG</th><th>THỜI GIAN</th><th>PHÂN LOẠI</th><th>SỐ TIỀN</th><th></th></tr></thead><tbody>${rows.map(e => `<tr><td><div class="entry-title"><span class="round-icon">${icon(categoryInfo(e.category)[3])}</span><div><strong>${esc(e.description || categoryInfo(e.category)[1])}</strong><small>${e.scope === 'history' ? 'Lịch sử · Không đổi số dư' : 'Có cập nhật số dư'}${e.recordMode === 'summary' ? ' · Tổng tháng' : ''}</small></div></div></td><td>${e.day ? `${e.day.slice(8)}/${e.day.slice(5,7)}/${e.day.slice(0,4)}` : `${periodLabel(e.period)}<br><span class="muted">Không có ngày</span>`}</td><td><span class="badge ${e.type === 'income' ? 'green' : e.type === 'expense' ? 'orange' : ''}">${types[e.type]}</span><br><small class="muted">${esc(categoryInfo(e.category)[1])}</small></td><td class="amount ${e.type === 'income' ? 'income' : e.type === 'expense' ? 'expense' : 'muted'}">${prefs.hidden ? '' : e.type === 'income' ? '+' : e.type === 'expense' ? '−' : ''}${money(e.amount)}</td><td><div class="table-actions">${iconButton(e.type === 'unknown' ? 'Xác nhận khoản này' : 'Sửa khoản','entry','edit',`data-id="${e.id}"`)}${iconButton('Xóa khoản','delete-entry','trash',`data-id="${e.id}"`)}</div></td></tr>`).join('')}</tbody></table></div>`;
 }
+function reportRange() {
+  if (ui.reportMode === 'month') return {from:ui.period,to:ui.period,label:`Tháng ${periodLabel(ui.period)}`};
+  if (ui.reportMode === 'year') return {from:`${ui.reportYear}-01`,to:ui.reportYear === monthKey().slice(0,4) ? monthKey() : `${ui.reportYear}-12`,label:`Năm ${ui.reportYear}${ui.reportYear === monthKey().slice(0,4) ? ` · đến ${periodLabel(monthKey())}` : ''}`};
+  if (ui.reportMode === 'range') return {from:ui.reportFrom,to:ui.reportTo,label:`${periodLabel(ui.reportFrom)} – ${periodLabel(ui.reportTo)}`};
+  const periods = ui.data.entries.map(e => e.period).sort();
+  return {from:periods[0] || monthKey(),to:periods.at(-1) || monthKey(),label:'Mọi thời gian'};
+}
+function reportControls() {
+  const current = monthKey(), input = (label,id,value,type = 'month',extra = '') => `<label class="field"><span>${label}</span><input id="${id}" type="${type}" value="${esc(value)}" ${extra}></label>`;
+  const mode = `<label class="field"><span>Xem theo</span><select id="report-mode">${[['month','Tháng'],['year','Năm'],['range','Khoảng tháng'],['all','Mọi thời gian']].map(([v,l]) => `<option value="${v}" ${ui.reportMode === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
+  const controls = ui.reportMode === 'month' ? input('Tháng/năm','report-month',ui.period,'month',`min="1900-01" max="${current}" required`) : ui.reportMode === 'year' ? input('Năm','report-year',ui.reportYear,'number',`min="1900" max="${current.slice(0,4)}" step="1" required`) : ui.reportMode === 'range' ? `${input('Từ tháng','report-from',ui.reportFrom,'month',`min="1900-01" max="${current}" required`)}${input('Đến tháng','report-to',ui.reportTo,'month',`min="1900-01" max="${current}" required`)}` : '';
+  return `<section class="panel report-controls" aria-label="Chọn kỳ thống kê">${mode}${controls}<p class="report-period">${esc(reportRange().label)}</p></section>`;
+}
+function reportsPage() {
+  const range = reportRange(), s = rangeStats(ui.data,range.from,range.to,{groupBy:ui.reportGroup});
+  const rate = value => value === null ? '—' : `${num(Math.round(value))}%`;
+  const grouping = `<label class="report-group">Gộp theo <select id="report-group" aria-label="Gộp thống kê theo"><option value="month" ${ui.reportGroup === 'month' ? 'selected' : ''}>Từng tháng</option><option value="year" ${ui.reportGroup === 'year' ? 'selected' : ''}>Từng năm</option></select></label>`;
+  return `${intro('Thống kê thu chi.','Xem lại dữ liệu cũ theo tháng, năm hoặc khoảng thời gian bạn chọn.',button('Nhập dữ liệu cũ','import','upload','btn-secondary'),false)}${reportControls()}${balanceWarnings(s)}${statsBlock(s,range.label)}<section class="report-summary"><div class="section-head"><div><h2>Thu chi theo ${ui.reportGroup === 'year' ? 'năm' : 'tháng'}</h2><p>${esc(range.label)} · ${s.count} khoản ghi chép</p></div>${grouping}</div><p class="form-hint">Bao gồm lịch sử đã nhập và các khoản mới. Khoản cần xác nhận chưa tính vào Thu/Chi. Dư từ thu chi là Thu − Chi; chuyển quỹ tiết kiệm được ghi riêng.</p>${!s.count ? notice('Chưa có dữ liệu trong kỳ này. Chọn kỳ khác hoặc nhập dữ liệu cũ để xem thống kê.') : ''}<div class="table-wrap report-table"><table><thead><tr><th>${ui.reportGroup === 'year' ? 'NĂM' : 'THÁNG'}</th><th>TỔNG THU</th><th>TỔNG CHI</th><th>DƯ THU CHI</th><th>TỶ LỆ DƯ</th><th>GHI CHÉP</th><th></th></tr></thead><tbody>${s.rows.map(row => `<tr><td><strong>${ui.reportGroup === 'year' ? row.period : periodLabel(row.period)}</strong>${ui.reportGroup === 'year' ? `<small class="report-row-note">${periodLabel(row.from)} – ${periodLabel(row.to)}</small>` : ''}</td><td class="amount income">${money(row.income)}</td><td class="amount expense">${money(row.expense)}</td><td class="amount ${row.net < 0 ? 'negative' : ''}">${money(row.net)}</td><td>${rate(row.rate)}</td><td>${row.count ? `${row.count} khoản${row.pending ? `<small class="report-row-note">${row.pending} cần xác nhận</small>` : ''}` : '<span class="muted">Chưa có dữ liệu</span>'}</td><td>${button('Xem khoản','report-detail','chevron','btn-ghost',`data-id="${row.from}_${row.to}"`)}</td></tr>`).join('')}</tbody><tfoot><tr><th>TỔNG CỘNG</th><td class="amount income">${money(s.income)}</td><td class="amount expense">${money(s.expense)}</td><td class="amount ${s.net < 0 ? 'negative' : ''}">${money(s.net)}</td><td>${rate(s.rate)}</td><td>${s.count} khoản</td><td></td></tr></tfoot></table></div></section>`;
+}
 function filteredEntries() {
-  return ui.data.entries.filter(e => (ui.allTime || e.period === ui.period) && (ui.filter === 'all' || e.type === ui.filter) && (ui.category === 'all' || e.category === ui.category) && (!ui.query || fold(`${e.description} ${categoryInfo(e.category)[1]} ${e.amount}`).includes(fold(ui.query)))).slice().sort((a,b) => (b.day || b.period).localeCompare(a.day || a.period));
+  const {from,to} = reportRange();
+  return ui.data.entries.filter(e => e.period >= from && e.period <= to && (ui.filter === 'all' || e.type === ui.filter) && (ui.category === 'all' || e.category === ui.category) && (!ui.query || fold(`${e.description} ${categoryInfo(e.category)[1]} ${e.amount}`).includes(fold(ui.query)))).slice().sort((a,b) => (b.day || b.period).localeCompare(a.day || a.period));
 }
 function ledgerPage() {
-  const rows = filteredEntries();
-  return `${intro('Một cuốn sổ, thật rõ ràng.','Ghi một chút mỗi ngày, hoặc bắt đầu bằng dữ liệu bạn đã có.',button('Thêm thu chi','entry','plus'))}${balanceWarnings()}${statsBlock()}<div class="toolbar"><label class="search">${icon('search')}<input id="search" value="${esc(ui.query)}" placeholder="Tìm ghi chú, danh mục, số tiền…" aria-label="Tìm khoản thu chi"></label><select id="category-filter" aria-label="Lọc danh mục"><option value="all">Mọi danh mục</option>${CATEGORIES.map(c => `<option value="${c[0]}" ${ui.category === c[0] ? 'selected' : ''}>${c[1]}</option>`).join('')}</select>${button('Nhập dữ liệu','import','upload','btn-secondary')}${button('Chốt tháng','close-month','checklist','btn-secondary')}</div><div class="filter-row">${[['all','Tất cả'],...Object.entries(types)].map(([v,l]) => `<button class="chip ${ui.filter === v ? 'active' : ''}" data-filter="${v}">${l}</button>`).join('')}<button class="chip ${ui.allTime ? 'active' : ''}" data-action="all-time">Mọi tháng</button><span class="result-count" id="result-count">${rows.length} khoản</span></div><div id="ledger-results">${entryTable(rows)}</div>`;
+  const rows = filteredEntries(), range = reportRange(), s = rangeStats(ui.data,range.from,range.to);
+  return `${intro('Một cuốn sổ, thật rõ ràng.','Ghi một chút mỗi ngày, hoặc bắt đầu bằng dữ liệu bạn đã có.',button('Thêm thu chi','entry','plus'),false)}${reportControls()}${balanceWarnings(s)}${statsBlock(s,range.label)}<p class="form-hint">Tổng thu/chi phía trên tính cho toàn bộ kỳ đã chọn. Các bộ lọc bên dưới áp dụng cho danh sách ghi chép.</p><div class="toolbar"><label class="search">${icon('search')}<input id="search" value="${esc(ui.query)}" placeholder="Tìm ghi chú, danh mục, số tiền…" aria-label="Tìm khoản thu chi"></label><select id="category-filter" aria-label="Lọc danh mục"><option value="all">Mọi danh mục</option>${CATEGORIES.map(c => `<option value="${c[0]}" ${ui.category === c[0] ? 'selected' : ''}>${c[1]}</option>`).join('')}</select>${button('Nhập dữ liệu','import','upload','btn-secondary')}${ui.reportMode === 'month' ? button('Chốt tháng','close-month','checklist','btn-secondary') : ''}</div><div class="filter-row">${[['all','Tất cả'],...Object.entries(types)].map(([v,l]) => `<button class="chip ${ui.filter === v ? 'active' : ''}" data-filter="${v}">${l}</button>`).join('')}<span class="result-count" id="result-count">${rows.length} khoản</span></div><div id="ledger-results">${rows.length ? entryTable(rows) : empty('Không có khoản phù hợp.','Chọn kỳ khác hoặc đổi bộ lọc để xem lại dữ liệu cũ.','import','Nhập dữ liệu cũ','book')}</div>`;
 }
 function savingsPage() {
   const b = balances(ui.data), s = monthStats(ui.data,ui.period);
@@ -163,7 +184,7 @@ function setupModal() {
   openModal('Bắt đầu từ số tiền bạn có.','Mốc này là tổng tiền thực tế, đã bao gồm phần tiết kiệm.',`${field('Tên của bạn','name','Bạn','text','required maxlength="60"')}${field('Tổng tiền hiện có (₫)','openingBalance','','text','required inputmode="numeric" placeholder="Ví dụ: 30.000.000"')}${field('Trong đó, đã dành tiết kiệm (₫)','openingSavings','0','text','required inputmode="numeric"')}${field('Ngày bắt đầu theo dõi','openingAt',dayKey(),'date',`required max="${dayKey()}"`)}${notice('Các khoản lịch sử nhập sau sẽ không tự cộng vào mốc số dư này.')}`,async f => mutate('setup',{name:f.get('name'),openingBalance:parseMoney(f.get('openingBalance')),openingSavings:parseMoney(f.get('openingSavings')),openingAt:f.get('openingAt')}),{submit:'Bắt đầu cuốn sổ'});
 }
 function entryModal(entryId) {
-  const existing = ui.data.entries.find(e => e.id === entryId), e = existing || {id:id(),type:'expense',amount:'',period:ui.period,day:ui.period === monthKey() ? dayKey() : '',category:'unclassified',description:'',scope:ui.period === monthKey() ? 'live' : 'history',recordMode:'detail'};
+  const existing = ui.data.entries.find(e => e.id === entryId), e = existing || {id:id(),type:'expense',amount:'',period:ui.period,day:ui.period === monthKey() ? dayKey() : '',category:'unclassified',description:'',scope:ui.data.settings && ui.period === monthKey() ? 'live' : 'history',recordMode:'detail'};
   openModal(existing ? 'Sửa một dòng ghi chép.' : 'Ghi thêm một chút.','Bạn có thể chỉ nhập tháng/năm nếu không nhớ ngày.',`<div class="type-switch">${Object.entries(types).map(([type,label]) => `<button type="button" data-type="${type}" class="${e.type === type ? 'active' : ''}">${label}</button>`).join('')}</div><input type="hidden" name="type" value="${e.type}">${field('Số tiền (₫)','amount',e.amount,'text','required inputmode="numeric" placeholder="0"') }<div class="form-row">${field('Tháng/năm','period',e.period,'month',`required max="${monthKey()}" min="1900-01"`)}${field('Ngày cụ thể','day',e.day,'date',`max="${dayKey()}"`,'Không bắt buộc')}</div><div class="form-row">${select('Danh mục','category',CATEGORIES.filter(c => c[2] === 'other' || c[2] === e.type || e.type === 'unknown').map(c => [c[0],c[1]]),e.category)}${select('Cách ghi','recordMode',[['detail','Từng khoản'],['summary','Tổng tháng']],e.recordMode)}</div>${noteField(e.description,'description','Nội dung / ghi chú')}${check('live','Khoản phát sinh sau mốc số dư — cập nhật tiền hiện có',e.scope === 'live') }<p class="form-hint">Bỏ chọn nếu đây là lịch sử đã nằm trong số dư ban đầu. “Cần xác nhận” không được tính vào Thu/Chi hay số dư.</p>`,async f => mutate('entry.save',{id:e.id,type:f.get('type'),amount:parseMoney(f.get('amount')),period:f.get('period'),day:f.get('day'),category:f.get('category'),description:f.get('description'),scope:f.has('live') ? 'live' : 'history',recordMode:f.get('recordMode')}),{submit:existing ? 'Lưu ghi chép' : 'Thêm vào sổ'});
 }
 function goalModal(goalId) {
@@ -231,8 +252,14 @@ const actions = {
   setup:setupModal,entry:entryModal,goal:goalModal,deposit:goalId => moveModal('deposit',goalId),withdraw:() => moveModal('withdraw'),allocate:() => moveModal('allocate'),release:() => moveModal('release'),reconcile:reconcileModal,'close-month':closeMonthModal,
   import() {ui.tab = 'import';render();},
   'pick-file'() {$('#import-file').click();},
-  'all-time'() {ui.allTime = !ui.allTime;render();},
-  pending() {ui.tab = 'ledger';ui.filter = 'unknown';ui.category = 'all';ui.query = '';render();},
+  'report-detail'(periods) {
+    const [from,to] = periods.split('_');
+    if (!validPeriod(from) || !validPeriod(to) || from > to) return;
+    if (from === to) {ui.reportMode = 'month';ui.period = from;}
+    else {ui.reportMode = 'range';ui.reportFrom = from;ui.reportTo = to > monthKey() ? monthKey() : to;}
+    ui.tab = 'ledger';ui.filter = 'all';ui.category = 'all';ui.query = '';render();window.scrollTo({top:0});
+  },
+  pending() {if (!['ledger','reports'].includes(ui.tab)) ui.reportMode = 'month';ui.tab = 'ledger';ui.filter = 'unknown';ui.category = 'all';ui.query = '';render();},
   'delete-entry'(entryId) {const e = ui.data.entries.find(e => e.id === entryId);if (e) confirmModal('Xóa dòng ghi chép này?',`Khoản ${types[e.type]} ${money(e.amount)} sẽ được xóa khỏi sổ.${e.scope === 'live' ? ' Số dư sẽ được tính lại.' : ''}`,'entry.delete',{id:entryId},'Xóa khoản');},
   'delete-goal'(goalId) {const g = ui.data.goals.find(g => g.id === goalId);if (g) confirmModal(`Xóa mục tiêu “${g.name}”?`,'Toàn bộ tiền đã phân bổ cho mục tiêu sẽ trả về quỹ tiết kiệm chung. Tổng tiền và tổng tiết kiệm không đổi.','goal.delete',{id:goalId},'Xóa mục tiêu');},
   export() {download(JSON.stringify(backup(ui.data),null,2),`luy-backup-${dayKey()}.json`);},
@@ -245,7 +272,7 @@ const actions = {
 document.addEventListener('click',async event => {
   const node = event.target.closest('[data-tab],[data-action],[data-filter],[data-type]');if (!node || node.disabled) return;
   try {
-    if (node.dataset.tab) {ui.tab = node.dataset.tab;render();window.scrollTo({top:0});}
+    if (node.dataset.tab) {if (ui.tab === 'overview' && node.dataset.tab === 'ledger') ui.reportMode = 'month';ui.tab = node.dataset.tab;render();window.scrollTo({top:0});}
     else if (node.dataset.filter) {ui.filter = node.dataset.filter;render();}
     else if (node.dataset.type) {
       const type = node.dataset.type;$('#modal [name="type"]').value = type;
@@ -268,7 +295,21 @@ document.addEventListener('submit',async event => {
 document.addEventListener('change',async event => {
   const node = event.target;
   try {
-    if (node.id === 'period') {if (node.value && node.value <= monthKey()) {ui.period = node.value;render();}}
+    if (node.id === 'period' || node.id === 'report-month') {
+      if (!validPeriod(node.value) || node.value > monthKey()) {render();throw new Error('Chọn tháng hợp lệ, không ở tương lai.');}
+      ui.period = node.value;render();
+    }
+    else if (node.id === 'report-mode') {if (['month','year','range','all'].includes(node.value)) {ui.reportMode = node.value;render();}}
+    else if (node.id === 'report-group') {if (['month','year'].includes(node.value)) {ui.reportGroup = node.value;render();}}
+    else if (node.id === 'report-year') {
+      if (!/^\d{4}$/.test(node.value) || Number(node.value) < 1900 || Number(node.value) > Number(monthKey().slice(0,4))) {render();throw new Error('Chọn năm từ 1900 đến năm hiện tại.');}
+      ui.reportYear = node.value;render();
+    }
+    else if (node.id === 'report-from' || node.id === 'report-to') {
+      const from = node.id === 'report-from' ? node.value : ui.reportFrom, to = node.id === 'report-to' ? node.value : ui.reportTo;
+      if (!validPeriod(from) || !validPeriod(to) || from > to || to > monthKey()) {render();throw new Error('Chọn khoảng tháng hợp lệ: tháng bắt đầu không sau tháng kết thúc, không ở tương lai.');}
+      ui.reportFrom = from;ui.reportTo = to;render();
+    }
     else if (node.id === 'category-filter') {ui.category = node.value;render();}
     else if (node.id === 'import-file') {await readImport(node.files[0]);node.value = '';}
     else if (node.closest('#modal-form') && $('#import-results')) updateImportPreview();
