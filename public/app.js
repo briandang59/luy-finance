@@ -1,6 +1,7 @@
 import {CATEGORIES,categoryInfo,emptyState,balances,monthStats,rangeStats,goalProgress,categoryTotals,applyOperation,validateBackup,parseMoney,dayKey,monthKey,shiftMonth,periodLabel,validPeriod} from './shared/model.js';
 import {seedState} from './shared/seed.js';
 import {parseCSV,detectMapping,importPreview,fold} from './shared/import.js';
+import {formatMoneyInput,moneySuggestions,updateMoneyInput} from './shared/money-input.js';
 
 const $ = (q,root = document) => root.querySelector(q);
 const $$ = (q,root = document) => [...root.querySelectorAll(q)];
@@ -26,7 +27,12 @@ const backup = state => ({app:'luy-finance',version:1,exportedAt:new Date().toIS
 const empty = (title,description,action = '',label = '',ico = 'leaf') => `<div class="empty">${icon(ico)}<h2>${title}</h2><p>${description}</p>${action ? button(label,action,'plus') : ''}</div>`;
 const button = (label,action,ico = '',cls = '',extra = '') => `<button type="button" class="btn ${cls}" data-action="${action}" ${extra}>${ico ? icon(ico) : ''}${label}</button>`;
 const iconButton = (label,action,ico,extra = '') => `<button type="button" class="icon-btn" title="${label}" aria-label="${label}" data-action="${action}" ${extra}>${icon(ico)}</button>`;
-const field = (label,name,value = '',type = 'text',extra = '',hint = '') => `<label class="field${name === 'amount' ? ' amount-input' : ''}"><span>${label}${hint ? `<small>${hint}</small>` : ''}</span><input name="${name}" type="${type}" value="${esc(value)}" ${extra}></label>`;
+const moneySuggestionButtons = (name,value) => moneySuggestions(value).map(amount => `<button type="button" data-action="money-suggestion" data-field="${name}" data-id="${amount}" aria-label="Nhập ${formatMoneyInput(amount)} đồng">${formatMoneyInput(amount)} ₫</button>`).join('');
+const field = (label,name,value = '',type = 'text',extra = '',hint = '') => {
+  const isMoney = extra.includes('inputmode="numeric"'), editable = isMoney && !/\b(?:readonly|disabled)\b/.test(extra), inputId = `field-${name}`;
+  const suggestions = editable ? moneySuggestionButtons(name,value) : '';
+  return `<div class="field${name === 'amount' ? ' amount-input' : ''}"><label for="${inputId}">${label}${hint ? `<small>${hint}</small>` : ''}</label><input id="${inputId}" name="${name}" type="${type}" value="${esc(isMoney ? formatMoneyInput(value) : value)}" ${isMoney ? 'data-money-input autocomplete="off"' : ''} ${extra}>${editable ? `<div class="money-shortcuts" ${suggestions ? '' : 'hidden'}><small>Nhập nhanh</small><div class="money-suggestions" data-money-suggestions="${name}" role="group" aria-label="Gợi ý ${label}">${suggestions}</div></div>` : ''}</div>`;
+};
 const select = (label,name,options,value,extra = '') => `<label class="field"><span>${label}</span><select name="${name}" ${extra}>${options.map(([v,l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
 const noteField = (value = '',name = 'note',label = 'Ghi chú',required = false) => `<label class="field"><span>${label}</span><textarea name="${name}" maxlength="1000" ${required ? 'required' : ''} placeholder="Một chút ngữ cảnh để sau này dễ nhớ…">${esc(value)}</textarea></label>`;
 const check = (name,label,checked = false,extra = '') => `<label class="check"><input type="checkbox" name="${name}" ${checked ? 'checked' : ''} ${extra}><span>${label}</span></label>`;
@@ -181,7 +187,7 @@ async function mutate(type,payload,context = ui.modal) {
   $('#modal').close();ui.modal = null;render();toast('Đã lưu vào ' + (isCloud() ? 'Google Sheets.' : 'trình duyệt này.'));
 }
 function setupModal() {
-  openModal('Bắt đầu từ số tiền bạn có.','Mốc này là tổng tiền thực tế, đã bao gồm phần tiết kiệm.',`${field('Tên của bạn','name','Bạn','text','required maxlength="60"')}${field('Tổng tiền hiện có (₫)','openingBalance','','text','required inputmode="numeric" placeholder="Ví dụ: 30.000.000"')}${field('Trong đó, đã dành tiết kiệm (₫)','openingSavings','0','text','required inputmode="numeric"')}${field('Ngày bắt đầu theo dõi','openingAt',dayKey(),'date',`required max="${dayKey()}"`)}${notice('Các khoản lịch sử nhập sau sẽ không tự cộng vào mốc số dư này.')}`,async f => mutate('setup',{name:f.get('name'),openingBalance:parseMoney(f.get('openingBalance')),openingSavings:parseMoney(f.get('openingSavings')),openingAt:f.get('openingAt')}),{submit:'Bắt đầu cuốn sổ'});
+  openModal('Bắt đầu từ số tiền bạn có.','Mốc này là tổng tiền thực tế, đã bao gồm phần tiết kiệm.',`${field('Tên của bạn','name','Bạn','text','required maxlength="60"')}${field('Tổng tiền hiện có (₫)','openingBalance','','text','required inputmode="numeric" placeholder="Ví dụ: 30,000,000"')}${field('Trong đó, đã dành tiết kiệm (₫)','openingSavings','0','text','required inputmode="numeric"')}${field('Ngày bắt đầu theo dõi','openingAt',dayKey(),'date',`required max="${dayKey()}"`)}${notice('Các khoản lịch sử nhập sau sẽ không tự cộng vào mốc số dư này.')}`,async f => mutate('setup',{name:f.get('name'),openingBalance:parseMoney(f.get('openingBalance')),openingSavings:parseMoney(f.get('openingSavings')),openingAt:f.get('openingAt')}),{submit:'Bắt đầu cuốn sổ'});
 }
 function entryModal(entryId) {
   const existing = ui.data.entries.find(e => e.id === entryId), e = existing || {id:id(),type:'expense',amount:'',period:ui.period,day:ui.period === monthKey() ? dayKey() : '',category:'unclassified',description:'',scope:ui.data.settings && ui.period === monthKey() ? 'live' : 'history',recordMode:'detail'};
@@ -244,6 +250,12 @@ async function refresh() {
   try {ui.data = isCloud() ? (await api('/api/data')).state : loadLocal();ui.error = '';ui.localError = false;render();toast('Đã tải dữ liệu mới nhất.');}finally {ui.loading = false;}
 }
 const actions = {
+  'money-suggestion'(amount,name) {
+    const input = $(`#modal [data-money-input][name="${name}"]`);
+    if (!input || input.readOnly || input.disabled || ui.modal?.submitting) return;
+    input.value = formatMoneyInput(amount);input.focus();input.setSelectionRange(input.value.length,input.value.length);
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+  },
   menu() {$('.sidebar')?.classList.toggle('open');$('.mobile-overlay')?.classList.toggle('open');},
   close() {if (!ui.modal?.submitting) {$('#modal').close();ui.modal = null;}},
   theme() {prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark';document.documentElement.dataset.theme = prefs.theme;localStorage.setItem(prefKey,JSON.stringify(prefs));render();},
@@ -279,7 +291,7 @@ document.addEventListener('click',async event => {
       $$('#modal [data-type]').forEach(n => n.classList.toggle('active',n.dataset.type === type));
       const category = $('#modal [name="category"]');category.innerHTML = CATEGORIES.filter(c => c[2] === 'other' || c[2] === type || type === 'unknown').map(c => `<option value="${c[0]}">${c[1]}</option>`).join('');
       const live = $('#modal [name="live"]');if (type === 'unknown') live.checked = false;
-    } else {await actions[node.dataset.action]?.(node.dataset.id || '');}
+    } else {await actions[node.dataset.action]?.(node.dataset.id || '',node.dataset.field);}
   } catch (e) {toast(e.message,true);}
 });
 document.addEventListener('submit',async event => {
@@ -316,8 +328,22 @@ document.addEventListener('change',async event => {
     else if (node.name === 'period' && node.closest('#modal')) {const day = $('#modal [name="day"]');if (day?.value && !day.value.startsWith(node.value)) day.value = '';}
   } catch (e) {toast(e.message,true);}
 });
+document.addEventListener('beforeinput',event => {
+  const node = event.target;
+  if (!node.matches?.('[data-money-input]') || node.selectionStart !== node.selectionEnd) return;
+  const cursor = node.selectionStart;
+  // Delete the neighbouring digit with its separator in a single keystroke.
+  if (event.inputType === 'deleteContentBackward' && node.value[cursor - 1] === ',') node.setSelectionRange(cursor - 2,cursor);
+  if (event.inputType === 'deleteContentForward' && node.value[cursor] === ',') node.setSelectionRange(cursor,cursor + 2);
+});
 document.addEventListener('input',event => {
   const node = event.target;
+  if (event.isComposing) return;
+  if (node.matches?.('[data-money-input]')) {
+    updateMoneyInput(node);
+    const suggestions = $(`#modal [data-money-suggestions="${node.name}"]`);
+    if (suggestions) {suggestions.innerHTML = moneySuggestionButtons(node.name,node.value);suggestions.parentElement.hidden = !suggestions.innerHTML;}
+  }
   if (node.id === 'search') {ui.query = node.value;const rows = filteredEntries();$('#ledger-results').innerHTML = entryTable(rows);$('#result-count').textContent = `${rows.length} khoản`;}
   if (node.name === 'actual' && $('#reconcile-difference')) {try {const diff = parseMoney(node.value) - balances(ui.data).cash;$('#reconcile-difference').textContent = `Chênh lệch: ${diff > 0 ? '+' : ''}${money(diff)}. Sẽ ghi riêng vào lịch sử đối chiếu.`;}catch {$('#reconcile-difference').textContent = '';}}
 });

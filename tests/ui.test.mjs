@@ -13,10 +13,11 @@ test('client boots, renders every page and dialog, and escapes names and notes',
     ['2025-02','income',3000],['2025-02','expense',600],['2025-02','unknown',999],['2025-03','expense',50],
   ].map(([period,type,amount],i) => ({id:`report-${i}`,period,type,amount,day:'',scope:'history',category:'unclassified',recordMode:'detail',description:`report-entry-${i}`})));
   const values = new Map([['luy-finance-data-v1',JSON.stringify({app:'luy-finance',version:1,state})]]), listeners = new Map();
-  const messages = [];
+  const messages = [], elements = new Map();
   const app = {innerHTML:''}, modal = {innerHTML:'',open:false,close(){this.open = false;},showModal(){this.open = true;},addEventListener(){}}, toasts = {append(node){messages.push(node.innerHTML);}};
   const overrides = {
-    document:{documentElement:{dataset:{}},querySelector:q => ({'#app':app,'#modal':modal,'#toasts':toasts}[q] || null),querySelectorAll:() => [],addEventListener:(type,fn) => listeners.set(type,fn),createElement:() => ({remove(){}})},
+    document:{documentElement:{dataset:{}},querySelector:q => elements.get(q) || {'#app':app,'#modal':modal,'#toasts':toasts}[q] || null,querySelectorAll:() => [],addEventListener:(type,fn) => listeners.set(type,fn),createElement:() => ({remove(){}})},
+    FormData:class extends FormData {constructor(form){super();for (const [name,value] of form.values) this.set(name,value);}},
     window:{addEventListener(){},scrollTo(){}},
     location:{search:'',pathname:'/',origin:'http://localhost:4180'},
     localStorage:{getItem:k => values.get(k) || null,setItem:(k,v) => values.set(k,v)},
@@ -64,6 +65,25 @@ test('client boots, renders every page and dialog, and escapes names and notes',
     for (const action of ['entry','goal','deposit','reconcile','close-month']) {
       await click({action});assert.equal(modal.open,true,`${action} dialog opens`);assert.match(modal.innerHTML,/modal-form/);await click({action:'close'});
     }
+    await click({action:'entry'});
+    assert.match(modal.innerHTML,/data-money-input/);assert.match(modal.innerHTML,/Nhập nhanh/);
+    const amount = {name:'amount',value:'1500000',selectionStart:7,selectionEnd:7,matches:selector => selector === '[data-money-input]',focus(){},setSelectionRange(start,end){this.selectionStart = start;this.selectionEnd = end;},dispatchEvent(){listeners.get('input')({target:this});}};
+    const suggestions = {innerHTML:'',parentElement:{hidden:false}};
+    elements.set('#modal [data-money-input][name="amount"]',amount);
+    elements.set('#modal [data-money-suggestions="amount"]',suggestions);
+    listeners.get('input')({target:amount});assert.equal(amount.value,'1,500,000');assert.equal(amount.selectionStart,9);
+    amount.value = '50';amount.selectionStart = amount.selectionEnd = 2;
+    listeners.get('input')({target:amount});assert.match(suggestions.innerHTML,/50,000 ₫/);
+    await click({action:'money-suggestion',id:'50000',field:'amount'});
+    assert.equal(amount.value,'50,000');assert.equal(modal.open,true);
+    amount.selectionStart = amount.selectionEnd = 3;
+    listeners.get('beforeinput')({target:amount,inputType:'deleteContentBackward'});
+    assert.equal(amount.selectionStart,1);assert.equal(amount.selectionEnd,3);
+    const submit = {disabled:false}, error = {textContent:''};
+    await listeners.get('submit')({preventDefault(){},target:{id:'modal-form',values:[['amount',amount.value],['type','income'],['period',monthKey()],['day',''],['category','unclassified'],['description','money-input-save-check'],['recordMode','detail']],querySelector:q => q === 'button[type="submit"]' ? submit : error}});
+    const saved = JSON.parse(values.get('luy-finance-data-v1')).state.entries.find(entry => entry.description === 'money-input-save-check');
+    assert.equal(saved.amount,50000);assert.equal(typeof saved.amount,'number');assert.equal(modal.open,false);
+    elements.clear();
     const importedOnly = {...state,settings:null,revision:0,entries:state.entries.filter(e => e.id.startsWith('report-')),moves:[],goals:[],adjustments:[],closes:[]};
     values.set('luy-finance-data-v1',JSON.stringify({app:'luy-finance',version:1,state:importedOnly}));
     await click({action:'refresh'});await click({tab:'reports'});await change('report-month','2025-02');
