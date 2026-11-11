@@ -55,6 +55,8 @@ test('client boots, renders every page and dialog, and escapes names and notes',
     await change('report-group','month');assert.match(app.innerHTML,/12\/2025/);
     await change('report-year',monthKey().slice(0,4));assert.match(app.innerHTML,new RegExp(`đến ${monthKey().slice(5)}/${monthKey().slice(0,4)}`));
     await change('report-mode','month');await change('report-month','2025-02');
+    assert.match(app.innerHTML,/Biểu đồ tròn chi tiêu tháng 02\/2025/);
+    assert.match(app.innerHTML,/stroke-dasharray="100 0"/);
     assert.match(totals(),/2\.400 ₫/);assert.match(totals(),/80%/);
     await click({action:'report-detail',id:'2025-02_2025-02'});assert.match(app.innerHTML,/value="2025-02"/);
     await change('report-mode','all');await click({tab:'reports'});
@@ -83,6 +85,19 @@ test('client boots, renders every page and dialog, and escapes names and notes',
     await listeners.get('submit')({preventDefault(){},target:{id:'modal-form',values:[['amount',amount.value],['type','income'],['period',monthKey()],['day',''],['category','unclassified'],['description','money-input-save-check'],['recordMode','detail']],querySelector:q => q === 'button[type="submit"]' ? submit : error}});
     const saved = JSON.parse(values.get('luy-finance-data-v1')).state.entries.find(entry => entry.description === 'money-input-save-check');
     assert.equal(saved.amount,50000);assert.equal(typeof saved.amount,'number');assert.equal(modal.open,false);
+    await click({tab:'ledger'});
+    await change('report-month',monthKey());await click({filter:'all'});
+    assert.match(app.innerHTML,/class="table-wrap entry-table"/);
+    assert.match(app.innerHTML,/btn-delete-entry/);
+    await click({action:'delete-entry',id:saved.id});
+    assert.equal(modal.open,true);
+    assert.ok(JSON.parse(values.get('luy-finance-data-v1')).state.entries.some(entry => entry.id === saved.id));
+    await click({action:'close'});
+    assert.ok(JSON.parse(values.get('luy-finance-data-v1')).state.entries.some(entry => entry.id === saved.id));
+    await click({action:'delete-entry',id:saved.id});
+    await listeners.get('submit')({preventDefault(){},target:{id:'modal-form',values:[],querySelector:q => q === 'button[type="submit"]' ? submit : error}});
+    assert.equal(modal.open,false);
+    assert.ok(!JSON.parse(values.get('luy-finance-data-v1')).state.entries.some(entry => entry.id === saved.id));
     elements.clear();
     const importedOnly = {...state,settings:null,revision:0,entries:state.entries.filter(e => e.id.startsWith('report-')),moves:[],goals:[],adjustments:[],closes:[]};
     values.set('luy-finance-data-v1',JSON.stringify({app:'luy-finance',version:1,state:importedOnly}));
